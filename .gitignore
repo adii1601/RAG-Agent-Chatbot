@@ -1,0 +1,20 @@
+# Virtual environment
+llm_env_312/
+
+# Secrets
+.env
+
+# Local database
+chatbot.db
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Old versions folder (ignores everything inside it)
+Prev versions/
+
+# Scratchpad tests
+test.py
+test.ipynb

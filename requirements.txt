@@ -1,0 +1,21 @@
+# UI & Web Framework
+streamlit
+
+# LangGraph & Core Orchestration
+langgraph
+langchain-core
+langchain-community
+langchain-text-splitters
+
+# Model Providers & Integrations
+langchain-google-genai
+langchain-ollama
+
+# Vector Database & PDF Ingestion
+faiss-cpu
+pypdf
+
+# External Tools & Utilities
+duckduckgo-search
+requests
+python-dotenv
