@@ -41,5 +41,5 @@ GOOGLE_API_KEY=your_gemini_api_key_here
 ```
 ### 4. Launch the application
 ```bash
-streamlit run v6_app.py
+streamlit run app.py
 ```

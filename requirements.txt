@@ -19,3 +19,6 @@ pypdf
 duckduckgo-search
 requests
 python-dotenv
+langchain-pymupdf4llm
+rapidocr-onnxruntime
+rapidocr

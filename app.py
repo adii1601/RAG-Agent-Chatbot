@@ -10,7 +10,7 @@ import os
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
-from v6_backend import (
+from backend import (
     chatbot, 
     ingest_pdf, 
     retrieve_all_threads, 
@@ -147,6 +147,9 @@ else:
 # ==============================================================================
 st.title("Multi Utility Chatbot")
 
+# Detect Streamlit Community Cloud environment
+is_cloud = os.getenv("STREAMLIT_SERVER_GATHER_USAGE_STATS") is not None
+
 # Detect whether the first message is already entered or in the active submission turn
 chat_has_started = (
     len(st.session_state["message_history"]) > 0 
@@ -162,13 +165,20 @@ if not chat_has_started:
             "☁️ Standard Cloud Mode (Gemini 3.5 Flash & Gemini Embeddings)",
             "🔒 Private Mode (Local Qwen 3.5 & Local Nomic Embeddings - 100% Offline)"
         ],
-        index=1 if is_private else 0,
+        index=0 if is_cloud else (1 if is_private else 0),
         key=f"radio_mode_{thread_key}"
     )
     chosen_private = "🔒 Private Mode" in selected_mode
 
+    # Guard: Warn if someone selects Private Mode on the live Cloud deployment
+    if chosen_private and is_cloud:
+        st.warning(
+            "⚠️ **Local Mode Notice:** Local Ollama models cannot run in Streamlit Cloud's free sandbox. "
+            "Please select **Cloud Mode (Gemini)** for this live web demo, or clone the repository to run locally with full privacy."
+        )
+
     chosen_thinking = False
-    if chosen_private:
+    if chosen_private and not is_cloud:
         chosen_thinking = st.toggle(
             "Thinking Mode",
             value=thinking_mode,
@@ -201,6 +211,11 @@ CONFIG = {
 }
 
 if user_input:
+    # Block execution if user attempts to run local mode on cloud
+    if is_private and is_cloud:
+        st.error("❌ Ollama is not accessible on Streamlit Cloud. Switch to Cloud Mode (Gemini) by starting a 'New Chat'.")
+        st.stop()
+    
     st.session_state["message_history"].append({"role": "human", "content": user_input})
     with st.chat_message('human'):
         st.markdown(user_input)
