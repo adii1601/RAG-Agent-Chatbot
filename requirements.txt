@@ -13,12 +13,11 @@ langchain-ollama
 
 # Vector Database & PDF Ingestion
 faiss-cpu
-pypdf
+langchain-pymupdf4llm
+rapidocr-onnxruntime
+rapidocr
 
 # External Tools & Utilities
 duckduckgo-search
 requests
 python-dotenv
-langchain-pymupdf4llm
-rapidocr-onnxruntime
-rapidocr

@@ -11,8 +11,9 @@ from typing import Annotated, Any, Dict, Optional, TypedDict
 import requests
 from dotenv import load_dotenv
 
-# LangChain Document Loading & Vectorstores
-from langchain_community.document_loaders import PyPDFLoader
+# Document Loading (Markdown + OCR) & Vectorstores
+from langchain_pymupdf4llm import PyMuPDF4LLMLoader
+from langchain_community.document_loaders.parsers import RapidOCRBlobParser
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
@@ -63,7 +64,6 @@ def init_settings_db():
             thinking_mode INTEGER DEFAULT 0
         )
     """)
-    # Ensure thinking_mode column exists if database already existed
     cursor.execute("PRAGMA table_info(thread_settings)")
     cols = [c[1] for c in cursor.fetchall()]
     if "thinking_mode" not in cols:
@@ -117,14 +117,30 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
         temp_path = temp_file.name
 
     try:
-        loader = PyPDFLoader(temp_path)
+        # Load documents as markdown and run RapidOCR on scanned pages/images
+        loader = PyMuPDF4LLMLoader(
+            temp_path,
+            mode="page",
+            table_strategy="lines",
+            extract_images=True,
+            images_parser=RapidOCRBlobParser()
+        )
         docs = loader.load()
 
         if not docs:
-            raise ValueError("The PDF could not be read or contains no text pages.")
+            raise ValueError("The PDF could not be read or contains no text/image pages.")
 
+        # Retain original uploaded filename in metadata
+        resolved_filename = filename or os.path.basename(temp_path)
+        for doc in docs:
+            doc.metadata["source"] = resolved_filename
+            doc.metadata["filename"] = resolved_filename
+
+        # Structure-aware chunking preserving markdown table integrity
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200, separators=["\n\n", "\n", " ", ""]
+            chunk_size=2000,
+            chunk_overlap=200,
+            separators=["\n## ", "\n### ", "\n\n", "\n", " ", ""]
         )
         chunks = splitter.split_documents(docs)
 
@@ -134,12 +150,12 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
         chosen_embedding = local_embedding if is_private else cloud_embedding
         vector_store = FAISS.from_documents(chunks, chosen_embedding)
         retriever = vector_store.as_retriever(
-            search_type="similarity", search_kwargs={"k": 4}
+            search_type="similarity", search_kwargs={"k": 5}
         )
 
         _THREAD_RETRIEVERS[str(thread_id)] = retriever
         _THREAD_METADATA[str(thread_id)] = {
-            "filename": filename or os.path.basename(temp_path),
+            "filename": resolved_filename,
             "documents": len(docs),
             "chunks": len(chunks),
             "is_private": is_private,
@@ -188,7 +204,8 @@ def get_stock_price(symbol: str) -> dict:
 
 @tool
 def rag_tool(query: str, config: RunnableConfig) -> dict:
-    """Retrieve relevant information from the uploaded PDF for this chat thread."""
+    """Retrieve relevant information from the uploaded PDF for this chat thread. 
+    Context is returned formatted in Markdown, preserving tables and section headers."""
     thread_id = config.get("configurable", {}).get("thread_id") if config else None
     retriever = _get_retriever(thread_id)
     if retriever is None:
@@ -228,7 +245,9 @@ def chat_node(state: ChatState, config=None):
 
     system_prompt = (
         f"You are a helpful AI assistant running in {mode_label} mode.\n"
-        "For questions regarding the uploaded document or PDF, use the `rag_tool`."
+        "For questions regarding the uploaded document or PDF, use the `rag_tool`.\n"
+        "Document context returned by `rag_tool` is formatted in Markdown. "
+        "Tables appear as `| column | column |` markdown rows; analyze them row by row when answering."
     )
 
     if is_private:
