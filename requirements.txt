@@ -19,6 +19,7 @@ rapidocr-onnxruntime
 rapidocr
 
 # External Tools & Utilities
+ddgs
 duckduckgo-search
 requests
 python-dotenv
