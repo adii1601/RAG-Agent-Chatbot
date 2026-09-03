@@ -1,10 +1,3 @@
-# v6_app.py
-# Visible "Thinking Mode" Toggle
-# Hide on Cloud Mode
-# Passed Configuration to Backend
-# Real-time Thinking Status Box
-
-
 import uuid
 import os
 import streamlit as st
