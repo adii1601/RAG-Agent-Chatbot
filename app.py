@@ -3,6 +3,23 @@ import os
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
+# ==============================================================================
+# 0. STREAMLIT SECRETS & CLOUD ENVIRONMENT SETUP
+# ==============================================================================
+# Inject Streamlit secrets into os.environ (enables LangSmith tracing & Google API Key on Cloud)
+try:
+    for key, val in st.secrets.items():
+        if isinstance(val, str):
+            os.environ[key] = val
+except Exception:
+    pass
+
+if "LANGCHAIN_PROJECT" not in os.environ:
+    os.environ["LANGCHAIN_PROJECT"] = "RAG Chatbot"
+
+# Reliable check for Streamlit Community Cloud container filesystem
+is_cloud = os.path.exists("/mount/src") or bool(os.getenv("STREAMLIT_SERVER_GATHER_USAGE_STATS"))
+
 from backend import (
     chatbot, 
     ingest_pdf, 
@@ -11,8 +28,6 @@ from backend import (
     set_thread_settings,
     get_thread_settings
 )
-
-os.environ["LANGCHAIN_PROJECT"] = "Chatbot Project"
 
 
 # ==============================================================================
@@ -107,7 +122,9 @@ uploaded_pdf = st.sidebar.file_uploader(
     key=f"pdf_uploader_{thread_key}"
 )
 if uploaded_pdf:
-    if active_thread_pdf and active_thread_pdf.get("filename") == uploaded_pdf.name:
+    if is_private and is_cloud:
+        st.sidebar.error("❌ Cannot index PDF in Private Mode on Streamlit Cloud (Local Ollama is unavailable). Please start a New Chat in Cloud Mode.")
+    elif active_thread_pdf and active_thread_pdf.get("filename") == uploaded_pdf.name:
         st.sidebar.info(f"`{uploaded_pdf.name}` is already indexed for this thread.")
     else:
         with st.sidebar.status("Indexing PDF…", expanded=True) as status_box:
@@ -140,16 +157,13 @@ else:
 # ==============================================================================
 st.title("Multi Utility Chatbot")
 
-# Detect Streamlit Community Cloud environment
-is_cloud = os.getenv("STREAMLIT_SERVER_GATHER_USAGE_STATS") is not None
-
 # Detect whether the first message is already entered or in the active submission turn
 chat_has_started = (
     len(st.session_state["message_history"]) > 0 
     or bool(st.session_state.get("chat_input_box"))
 )
 
-# Mode selection only shown BEFORE the user hits enter on message 1
+# Mode selection only shown BEFORE the user sends message 1
 if not chat_has_started:
     st.info("💡 **Mode Selection for New Chat:**")
     selected_mode = st.radio(
@@ -163,11 +177,11 @@ if not chat_has_started:
     )
     chosen_private = "🔒 Private Mode" in selected_mode
 
-    # Guard: Warn if someone selects Private Mode on the live Cloud deployment
+    # Guard: Warn if someone selects Private Mode on Streamlit Cloud
     if chosen_private and is_cloud:
         st.warning(
             "⚠️ **Local Mode Notice:** Local Ollama models cannot run in Streamlit Cloud's free sandbox. "
-            "Please select **Cloud Mode (Gemini)** for this live web demo, or clone the repository to run locally with full privacy."
+            "Please switch back to **Standard Cloud Mode (Gemini)** for this live demo, or clone the repository to run locally."
         )
 
     chosen_thinking = False
@@ -182,11 +196,13 @@ if not chat_has_started:
     set_thread_settings(thread_key, chosen_private, chosen_thinking)
     is_private, thinking_mode = chosen_private, chosen_thinking
 else:
-    # Permanently locked read-only indicators once first message is sent
+    # Read-only indicator once conversation is active
     mode_text = "🔒 Private Mode (Local Qwen 3.5)" if is_private else "☁️ Standard Cloud Mode (Gemini)"
     if is_private:
         think_text = "ON" if thinking_mode else "OFF"
         st.caption(f"Session Mode: **{mode_text}** | Thinking Mode: **{think_text}**")
+        if is_cloud:
+            st.warning("⚠️ **Notice:** This thread is locked to Local Ollama mode, which cannot execute on Streamlit Cloud. Start a **New Chat** to use Gemini.")
     else:
         st.caption(f"Session Mode: **{mode_text}**")
 
@@ -204,11 +220,11 @@ CONFIG = {
 }
 
 if user_input:
-    # Block execution if user attempts to run local mode on cloud
+    # Block execution before invocation if in Private Mode on Cloud
     if is_private and is_cloud:
-        st.error("❌ Ollama is not accessible on Streamlit Cloud. Switch to Cloud Mode (Gemini) by starting a 'New Chat'.")
+        st.error("❌ Local Ollama models are not available on Streamlit Cloud. Click **New Chat** and select Cloud Mode (Gemini) to continue.")
         st.stop()
-    
+
     st.session_state["message_history"].append({"role": "human", "content": user_input})
     with st.chat_message('human'):
         st.markdown(user_input)
