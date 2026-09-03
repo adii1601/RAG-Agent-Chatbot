@@ -7,10 +7,11 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, System
 # 0. STREAMLIT SECRETS & CLOUD ENVIRONMENT SETUP
 # ==============================================================================
 # Inject Streamlit secrets into os.environ (enables LangSmith tracing & Google API Key on Cloud)
+# 0. STREAMLIT SECRETS & CLOUD ENVIRONMENT SETUP
 try:
     for key, val in st.secrets.items():
-        if isinstance(val, str):
-            os.environ[key] = val
+        # Handle booleans and strings correctly
+        os.environ[key] = str(val).lower() if isinstance(val, bool) else str(val)
 except Exception:
     pass
 
