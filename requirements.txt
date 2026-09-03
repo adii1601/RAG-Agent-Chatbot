@@ -6,6 +6,7 @@ langgraph
 langchain-core
 langchain-community
 langchain-text-splitters
+langgraph-checkpoint-sqlite
 
 # Model Providers & Integrations
 langchain-google-genai
