@@ -2,6 +2,10 @@
 
 An Agentic Retrieval-Augmented Generation (RAG) assistant built with LangGraph, LangChain, FAISS, and Streamlit. The agent intelligently selects between dynamic web search and semantic document retrieval, supporting seamless toggling between local LLMs (Ollama) and cloud models (Google Gemini).
 
+### 🚀 Live Demo
+
+👉 **[Try the Live App](https://rag-agent-chatbot-adii.streamlit.app/)**
+
 ---
 
 ## ✨ Features
