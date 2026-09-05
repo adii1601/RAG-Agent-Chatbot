@@ -109,26 +109,9 @@ def _get_retriever(thread_id: Optional[str]):
     return None
 
 
-import fitz  # PyMuPDF engine
+import fitz
 import pymupdf4llm
 from langchain_core.documents import Document
-
-_OCR_ENGINE = None
-
-def _get_ocr_engine():
-    """Lazy-loads RapidOCR only when a scanned document is detected."""
-    global _OCR_ENGINE
-    if _OCR_ENGINE is None:
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-            _OCR_ENGINE = RapidOCR()
-        except Exception:
-            try:
-                from rapidocr import RapidOCR
-                _OCR_ENGINE = RapidOCR()
-            except Exception:
-                _OCR_ENGINE = None
-    return _OCR_ENGINE
 
 def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None, is_private: bool = False) -> dict:
     if not file_bytes:
@@ -140,49 +123,43 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
 
     try:
         resolved_filename = filename or os.path.basename(temp_path)
+        
+        # Extract page-by-page markdown with native table preservation
+        pages_data = pymupdf4llm.to_markdown(temp_path, page_chunks=True)
         docs = []
-        ocr_engine = _get_ocr_engine()
 
-        # Open PDF with PyMuPDF to inspect each page
-        with fitz.open(temp_path) as pdf_doc:
-            for page_idx in range(len(pdf_doc)):
-                page = pdf_doc[page_idx]
-                page_text = ""
+        for p in pages_data:
+            text = p.get("text", "").strip()
+            page_no = p.get("metadata", {}).get("page_number", len(docs) + 1)
 
-                # 1. First attempt: Structured markdown extraction
+            # Fallback: If page has no text (scanned), extract via RapidOCR
+            if not text:
                 try:
-                    page_text = pymupdf4llm.to_markdown(pdf_doc, pages=[page_idx], table_strategy="lines")
-                except Exception:
-                    page_text = ""
+                    from rapidocr_onnxruntime import RapidOCR
+                    ocr = RapidOCR()
+                    with fitz.open(temp_path) as pdf_doc:
+                        pix = pdf_doc[page_no - 1].get_pixmap(dpi=150)
+                        ocr_res, _ = ocr(pix.tobytes("png"))
+                        if ocr_res:
+                            text = "\n".join([line[1] for line in ocr_res if len(line) > 1])
+                except Exception as ocr_err:
+                    print(f"OCR fallback error: {ocr_err}")
 
-                # 2. Fallback: If page is scanned (less than 40 chars extracted), run RapidOCR
-                if (not page_text or len(page_text.strip()) < 40) and ocr_engine is not None:
-                    try:
-                        pix = page.get_pixmap(dpi=150)
-                        img_bytes = pix.tobytes("png")
-                        ocr_result, _ = ocr_engine(img_bytes)
-                        if ocr_result:
-                            ocr_lines = [line[1] for line in ocr_result if len(line) > 1]
-                            page_text = "\n".join(ocr_lines)
-                    except Exception:
-                        pass
-
-                if page_text and page_text.strip():
-                    docs.append(
-                        Document(
-                            page_content=page_text.strip(),
-                            metadata={
-                                "source": resolved_filename,
-                                "filename": resolved_filename,
-                                "page": page_idx + 1
-                            }
-                        )
+            if text:
+                docs.append(
+                    Document(
+                        page_content=text,
+                        metadata={
+                            "source": resolved_filename,
+                            "filename": resolved_filename,
+                            "page": page_no
+                        }
                     )
+                )
 
         if not docs:
-            raise ValueError("The PDF could not be read or contains no extractable text/scans.")
+            raise ValueError("No extractable text found in this PDF.")
 
-        # Structure-aware chunking preserving markdown table integrity
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=2000,
             chunk_overlap=200,
@@ -190,14 +167,9 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
         )
         chunks = splitter.split_documents(docs)
 
-        if not chunks:
-            raise ValueError("No extractable text found in this PDF.")
-
         chosen_embedding = local_embedding if is_private else cloud_embedding
         vector_store = FAISS.from_documents(chunks, chosen_embedding)
-        retriever = vector_store.as_retriever(
-            search_type="similarity", search_kwargs={"k": 5}
-        )
+        retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
         _THREAD_RETRIEVERS[str(thread_id)] = retriever
         _THREAD_METADATA[str(thread_id)] = {
