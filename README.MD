@@ -13,9 +13,8 @@ An Agentic Retrieval-Augmented Generation (RAG) assistant built with LangGraph, 
 * **Autonomous Tool Routing**: Employs LangGraph agentic workflows to decide when to retrieve from documents or search external web sources via DuckDuckGo.
 * **Semantic Document Ingestion**: Ingests and chunks PDF documents, generating vector embeddings stored locally in FAISS.
 * **Interactive UI**: Built with Streamlit for clean conversational interaction and real-time tool execution tracking.
-* **Markdown-Aware Table Extraction**: Uses PyMuPDF4LLM to convert PDF tables into structured Markdown grids (| col | col |) rather than flattening them into unstructured, misaligned text.
-* **Table-Preserving Chunking**: Employs hierarchical separators (\n## , \n### , \n\n) to prevent cutting tables in half across chunk boundaries, ensuring complete headers and data stay intact.
-* **Scanned Document OCR**: Automatically detects scanned or image-only pages and extracts embedded text using RapidOCR without requiring local Tesseract installations.
+* **Markdown-Aware Table Extraction**: Uses PyMuPDF4LLM to convert PDF tables into structured Markdown grids (`| col | col |`) rather than flattening them into unstructured, misaligned text.
+* **Table-Preserving Chunking**: Employs hierarchical separators (`\n## `, `\n### `, `\n\n`) to prevent cutting tables in half across chunk boundaries, ensuring complete headers and data stay intact.
 
 ---
 
@@ -24,10 +23,10 @@ An Agentic Retrieval-Augmented Generation (RAG) assistant built with LangGraph, 
 * **Agent Orchestration**: LangGraph, LangChain
 * **Models**: Google Gemini 3.5 Flash (Cloud), Ollama Qwen 3.5 (Offline Private Mode)
 * **Embeddings & Vector Store**: Gemini Embeddings / Nomic Embed, FAISS
-* **Document Processing & OCR**: PyMuPDF4LLM (Markdown table parsing), RapidOCR via ONNX Runtime (scanned PDF text extraction)
+* **Document Processing & OCR**: PyMuPDF4LLM (Markdown table parsing & structured layout extraction)
 * **Text Chunking**: RecursiveCharacterTextSplitter (structure- and table-preserving separators)
 * **Storage & Checkpointing**: SQLite, LangGraph SqliteSaver (thread-level conversation memory)
-* **Agent Tools**: Document RAG (rag_tool), DuckDuckGo Web Search, Alpha Vantage Stock API, Arithmetic Calculator
+* **Agent Tools**: Document RAG (`rag_tool`), DuckDuckGo Web Search, Alpha Vantage Stock API, Arithmetic Calculator
 
 ---
 
