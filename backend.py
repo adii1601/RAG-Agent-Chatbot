@@ -108,6 +108,28 @@ def _get_retriever(thread_id: Optional[str]):
         return _THREAD_RETRIEVERS[str(thread_id)]
     return None
 
+
+import fitz  # PyMuPDF engine
+import pymupdf4llm
+from langchain_core.documents import Document
+
+_OCR_ENGINE = None
+
+def _get_ocr_engine():
+    """Lazy-loads RapidOCR only when a scanned document is detected."""
+    global _OCR_ENGINE
+    if _OCR_ENGINE is None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _OCR_ENGINE = RapidOCR()
+        except Exception:
+            try:
+                from rapidocr import RapidOCR
+                _OCR_ENGINE = RapidOCR()
+            except Exception:
+                _OCR_ENGINE = None
+    return _OCR_ENGINE
+
 def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None, is_private: bool = False) -> dict:
     if not file_bytes:
         raise ValueError("No bytes received for ingestion.")
@@ -117,24 +139,48 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
         temp_path = temp_file.name
 
     try:
-        # Load documents as markdown and run RapidOCR on scanned pages/images
-        loader = PyMuPDF4LLMLoader(
-            temp_path,
-            mode="page",
-            table_strategy="lines",
-            extract_images=True,
-            images_parser=RapidOCRBlobParser()
-        )
-        docs = loader.load()
+        resolved_filename = filename or os.path.basename(temp_path)
+        docs = []
+        ocr_engine = _get_ocr_engine()
+
+        # Open PDF with PyMuPDF to inspect each page
+        with fitz.open(temp_path) as pdf_doc:
+            for page_idx in range(len(pdf_doc)):
+                page = pdf_doc[page_idx]
+                page_text = ""
+
+                # 1. First attempt: Structured markdown extraction
+                try:
+                    page_text = pymupdf4llm.to_markdown(pdf_doc, pages=[page_idx], table_strategy="lines")
+                except Exception:
+                    page_text = ""
+
+                # 2. Fallback: If page is scanned (less than 40 chars extracted), run RapidOCR
+                if (not page_text or len(page_text.strip()) < 40) and ocr_engine is not None:
+                    try:
+                        pix = page.get_pixmap(dpi=150)
+                        img_bytes = pix.tobytes("png")
+                        ocr_result, _ = ocr_engine(img_bytes)
+                        if ocr_result:
+                            ocr_lines = [line[1] for line in ocr_result if len(line) > 1]
+                            page_text = "\n".join(ocr_lines)
+                    except Exception:
+                        pass
+
+                if page_text and page_text.strip():
+                    docs.append(
+                        Document(
+                            page_content=page_text.strip(),
+                            metadata={
+                                "source": resolved_filename,
+                                "filename": resolved_filename,
+                                "page": page_idx + 1
+                            }
+                        )
+                    )
 
         if not docs:
-            raise ValueError("The PDF could not be read or contains no text/image pages.")
-
-        # Retain original uploaded filename in metadata
-        resolved_filename = filename or os.path.basename(temp_path)
-        for doc in docs:
-            doc.metadata["source"] = resolved_filename
-            doc.metadata["filename"] = resolved_filename
+            raise ValueError("The PDF could not be read or contains no extractable text/scans.")
 
         # Structure-aware chunking preserving markdown table integrity
         splitter = RecursiveCharacterTextSplitter(
@@ -167,6 +213,67 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
             os.remove(temp_path)
         except OSError:
             pass
+
+
+# def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None, is_private: bool = False) -> dict:
+#     if not file_bytes:
+#         raise ValueError("No bytes received for ingestion.")
+
+#     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+#         temp_file.write(file_bytes)
+#         temp_path = temp_file.name
+
+#     try:
+#         # Load documents as markdown and run RapidOCR on scanned pages/images
+#         loader = PyMuPDF4LLMLoader(
+#             temp_path,
+#             mode="page",
+#             table_strategy="lines",
+#             extract_images=True,
+#             images_parser=RapidOCRBlobParser()
+#         )
+#         docs = loader.load()
+
+#         if not docs:
+#             raise ValueError("The PDF could not be read or contains no text/image pages.")
+
+#         # Retain original uploaded filename in metadata
+#         resolved_filename = filename or os.path.basename(temp_path)
+#         for doc in docs:
+#             doc.metadata["source"] = resolved_filename
+#             doc.metadata["filename"] = resolved_filename
+
+#         # Structure-aware chunking preserving markdown table integrity
+#         splitter = RecursiveCharacterTextSplitter(
+#             chunk_size=2000,
+#             chunk_overlap=200,
+#             separators=["\n## ", "\n### ", "\n\n", "\n", " ", ""]
+#         )
+#         chunks = splitter.split_documents(docs)
+
+#         if not chunks:
+#             raise ValueError("No extractable text found in this PDF.")
+
+#         chosen_embedding = local_embedding if is_private else cloud_embedding
+#         vector_store = FAISS.from_documents(chunks, chosen_embedding)
+#         retriever = vector_store.as_retriever(
+#             search_type="similarity", search_kwargs={"k": 5}
+#         )
+
+#         _THREAD_RETRIEVERS[str(thread_id)] = retriever
+#         _THREAD_METADATA[str(thread_id)] = {
+#             "filename": resolved_filename,
+#             "documents": len(docs),
+#             "chunks": len(chunks),
+#             "is_private": is_private,
+#         }
+
+#         return _THREAD_METADATA[str(thread_id)]
+#     finally:
+#         try:
+#             os.remove(temp_path)
+#         except OSError:
+#             pass
 
 
 # ==============================================================================
