@@ -8,28 +8,22 @@ import sqlite3
 import tempfile
 from typing import Annotated, Any, Dict, Optional, TypedDict
 
+import pymupdf4llm
 import requests
 from dotenv import load_dotenv
-
-# Document Loading (Markdown + OCR) & Vectorstores
-from langchain_pymupdf4llm import PyMuPDF4LLMLoader
-from langchain_community.document_loaders.parsers import RapidOCRBlobParser
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-
-# Embedding Models & LLMs
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_ollama import ChatOllama, OllamaEmbeddings
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-
-# LangGraph Components & Checkpointer
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langchain_core.tools import tool
-from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
 
 load_dotenv()
 os.environ["LANGCHAIN_PROJECT"] = "RAG Chatbot"
@@ -97,7 +91,7 @@ def get_thread_settings(thread_id: str) -> tuple[bool, bool]:
 
 
 # ==============================================================================
-# 4. STRICT THREAD-LEVEL PDF RETRIEVER MANAGEMENT
+# 4. STRICT THREAD-LEVEL PDF RETRIEVER MANAGEMENT (MARKDOWN & TABLES)
 # ==============================================================================
 
 _THREAD_RETRIEVERS: Dict[str, Any] = {}
@@ -117,26 +111,31 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
         temp_path = temp_file.name
 
     try:
-        # Load documents as markdown and run RapidOCR on scanned pages/images
-        loader = PyMuPDF4LLMLoader(
-            temp_path,
-            mode="page",
-            table_strategy="lines",
-            extract_images=True,
-            images_parser=RapidOCRBlobParser()
-        )
-        docs = loader.load()
+        resolved_filename = filename or os.path.basename(temp_path)
+
+        # Native PyMuPDF4LLM extraction converts PDF tables directly into Markdown format (| col | col |)
+        pages_data = pymupdf4llm.to_markdown(temp_path, page_chunks=True)
+        docs = []
+
+        for p in pages_data:
+            text = p.get("text", "").strip()
+            page_no = p.get("metadata", {}).get("page_number", len(docs) + 1)
+            if text:
+                docs.append(
+                    Document(
+                        page_content=text,
+                        metadata={
+                            "source": resolved_filename,
+                            "filename": resolved_filename,
+                            "page": page_no,
+                        }
+                    )
+                )
 
         if not docs:
-            raise ValueError("The PDF could not be read or contains no text/image pages.")
+            raise ValueError("No extractable digital text found in this PDF.")
 
-        # Retain original uploaded filename in metadata
-        resolved_filename = filename or os.path.basename(temp_path)
-        for doc in docs:
-            doc.metadata["source"] = resolved_filename
-            doc.metadata["filename"] = resolved_filename
-
-        # Structure-aware chunking preserving markdown table integrity
+        # Structure-aware chunking preserving Markdown table integrity
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=2000,
             chunk_overlap=200,
@@ -145,7 +144,7 @@ def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None
         chunks = splitter.split_documents(docs)
 
         if not chunks:
-            raise ValueError("No extractable text found in this PDF.")
+            raise ValueError("No extractable text chunks generated from this PDF.")
 
         chosen_embedding = local_embedding if is_private else cloud_embedding
         vector_store = FAISS.from_documents(chunks, chosen_embedding)

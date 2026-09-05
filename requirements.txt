@@ -15,8 +15,6 @@ langchain-ollama
 # Vector Database & PDF Ingestion
 faiss-cpu
 langchain-pymupdf4llm
-rapidocr-onnxruntime
-rapidocr
 
 # External Tools & Utilities
 ddgs
